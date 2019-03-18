@@ -1,0 +1,528 @@
+---
+title: "Assignment 1 | Big Data Analytics Capstone"
+author: "Michael Rose"
+output:
+  pdf_document:
+    highlight: espresso
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, background = "#888888", highlight = TRUE)
+library(jsonlite)
+library(tidyverse)
+library(magrittr)
+library(egg)
+library(kableExtra)
+library(listviewer)
+library(rgdal)
+```
+
+# Titanic Data
+
+## Preparation
+
+### Load Data
+
+First we must load the data in. Since this is in xls format, we will use the `readxl` package.
+
+```{r}
+# load data
+titanic <- readxl::read_xls("/home/michael/Desktop/SS/BigDataCapstone/Titanic.xls")
+```
+
+```{r, echo = FALSE}
+# create table function
+kabletable <- function(data, scale = FALSE){
+  if (scale == FALSE) {
+    data %>% kable() %>% kable_styling(position = "center")
+  } else {
+    data %>% kable() %>% kable_styling(position = "center", latex_options = "scale_down")
+  }
+}
+
+# look at it
+titanic %>% head() %>% kabletable()
+```
+
+From the table above, we see that it read in 5 columns and added a 6th which seems to originally be a legend. We need to clean this data frame up.
+
+### Create Factor Encodings
+
+```{r}
+# clean up column names
+titanic %<>% rename("class" = CLASS..1, "age" = AGE, "sex" = SEX, "survive" = SURVIVE)
+
+# change doubles to factors for manipulation
+titanic %<>% mutate_if(is.numeric, as.factor)
+
+# change factor levels according to legend 
+titanic %<>% mutate(class = recode(class,
+                                  "0" = "crew", 
+                                  "1" = "first",
+                                  "2" = "second", 
+                                  "3" = "third"),
+                   age = recode(age,
+                                "0" = "child",
+                                "1" = "adult"),
+                   sex = recode(sex,
+                                "0" = "female",
+                                "1" = "male"),
+                   survive = recode(survive,
+                                    "0" = "no",
+                                    "1" = "yes")) %>% 
+  select(class, age, sex, survive)
+
+# check for missing values 
+titanic %>% 
+  select_if(function(x) any(is.na(x))) %>% 
+  summarize_each(funs(sum(is.na(.))))
+```
+
+```{r, echo = FALSE}
+titanic %>% head() %>% kabletable()
+```
+
+
+
+This dataframe looks much tidier, and we have no missing values. 
+
+## Problem 1
+
+Dataset : Titanic
+
+Question: What are the proportions of each factor in regards to survival rate?
+
+Methods Used: 
+
+  - ggplot
+  - geom_bar
+  - xlab
+  - ylab
+  - scale_fill_manual
+  - theme
+  - ggtitle
+  - ggarrange
+
+Visualization Results: 
+
+```{r}
+p_class <- titanic %>% 
+  ggplot(aes(x = class, fill = survive)) + 
+  geom_bar(position = "fill") + 
+  xlab("Class") + ylab("Proportion") + 
+  scale_fill_manual(values = c("#CCCC00", "#99CCFF")) + 
+  theme(legend.position = "none") + 
+  ggtitle("Survival Proportions")
+
+p_age <- titanic %>% 
+  ggplot(aes(x = age, fill = survive)) + 
+  geom_bar(position = "fill") + 
+  xlab("Age") + ylab(NULL) + 
+  scale_fill_manual(values = c("#CCCC00", "#99CCFF")) + 
+  theme(legend.position = "none")
+
+p_sex <- titanic %>% 
+  ggplot(aes(x = sex, fill = survive)) + 
+  geom_bar(position = "fill") + 
+  xlab("Sex") + ylab(NULL) + 
+  scale_fill_manual(values = c("#CCCC00", "#99CCFF")) +
+  theme(legend.position = "bottom")
+
+ggarrange(p_class, p_age, p_sex, nrow = 1)
+```
+
+From the plots above, we see the following:
+
+  - The crew took the largest hit in mortality. It seems that many of them went down with the ship.
+  - First class had the most people who survived. This is strange, because the majority of people didn't sail first class. It seems that the poorer you were, the more likely you were to not survive. 
+  
+
+```{r, echo = FALSE}
+titanic %>% group_by(class) %>% count() %>% kabletable()
+```
+
+  - adults and men were more likely to die, as they seem to have saved the women and children first. 
+
+```{r}
+p_class_age <- titanic %>% 
+  ggplot(aes(x = class, fill = age)) + 
+  geom_bar(position = "fill") + 
+  xlab("Class") + ylab("Proportion") + 
+  scale_fill_manual(values = c("#CCCC00", "#99CCFF")) + 
+  theme(legend.position = "bottom") + 
+  ggtitle("Class Proportions")
+
+p_class_sex <- titanic %>% 
+  ggplot(aes(x = class, fill = sex)) + 
+  geom_bar(position = "fill") + 
+  xlab("Class") + ylab(NULL) + 
+  scale_fill_manual(values = c("#CCCC00", "#99CCFF")) + 
+  theme(legend.position = "bottom")
+
+ggarrange(p_class_age, p_class_sex, nrow = 1)
+```
+
+From the plots above, we see the following: 
+
+  - The crew consisted entirely of adults.
+  - As the class decreased, the proportion of children increased 
+  - First class contained the largest proportion of females, with a steady decline in females by class. 
+  
+# Problem 2 
+
+### Additional R Courses
+
+This section will focus on information gained from the datacamp courses 
+
+- **Functional Programming with purrr**
+- **Intermediate Functional Programming with purrr**.
+- **Working with Web Data in R**
+
+### Dataset
+
+The New York State government has an open data portal that allows a user to get data in JSON format. 
+Here is a link to the dataset used : [NY State Retail Food Stores](https://data.ny.gov/Economic-Development/Retail-Food-Stores/9a8c-vfzj)
+
+
+Methods Used: 
+
+ - fromJSON
+ - str
+ - map_* variants
+ - safe_extract
+ - flatten_chr
+ - set_names 
+ - paste0
+ - glimpse
+ - head
+ - replace
+ - is.na
+ - mutate_* variants
+ - select
+ - summary
+ - bind_cols
+ - readOGR
+ - coordinates
+ - proj4string
+ - names
+ - CRS
+ - SPtransform
+
+```{r}
+# grab JSON data
+food_markets_raw <- jsonlite::fromJSON("https://data.ny.gov/api/views/9a8c-vfzj/rows.json?accessType=DOWNLOAD", simplifyVector = FALSE)
+```
+
+### What does the JSON representation look like? 
+
+```{r}
+str(food_markets_raw, max.level = 1)
+```
+
+We see that our JSON consists of 2 components, meta (metadata), and data. Lets look at the different structures: 
+
+### meta
+
+```{r}
+str(food_markets_raw$meta, max.level = 1, list.len = 5)
+```
+
+Our metadata is a single list. We can look into its nested structure and pull the columns component. This tells us what data we have for each food market in the data component. Lets grab that component and place it in a character vector.
+
+```{r}
+# look at json data
+# jsonedit(food_markets_raw[[c("meta", "view")]])
+
+c_names <- food_markets_raw[[c("meta", "view", "columns")]] %>% 
+  map_chr("name")
+
+# output of column names 
+c_names %>% kabletable()
+```
+
+
+### data
+
+```{r}
+str(food_markets_raw$data, max.level = 1, list.len = 5)
+```
+
+So we have a data set of lists for 29,389 different food markets. Lets focus on this data for now
+
+```{r}
+# focus on data component
+food_markets <- food_markets_raw$data
+
+# add column names to the food markets 
+food_markets %<>% map(set_names, c_names)
+
+# look at one of the columns
+food_markets %>% 
+  map_chr("DBA Name") %>% 
+  head(10) %>% 
+  kabletable()
+```
+
+Our dataframe is shaping up nicely. From looking at the json information above (it won't knit to PDF, but the code is available commented), we see that 22 of the 23 variables can be easily extracted. Location holds some unparsed JSON that must be handled separately. 
+
+### Creating a Dataframe 
+
+```{r}
+# grab target names 
+names_to_process <- c_names[c_names != "Location"]
+
+# create a function to extract with the presence of NULLs
+safe_extract <- function(grabbed_list, item){
+  res <- grabbed_list[item]
+  null_found <- map_lgl(res, is.null)
+  res[null_found] <- NA
+  res
+}
+
+# extract from food markets
+markets_frame <- food_markets %>% 
+  map_df(safe_extract, names_to_process)
+
+markets_frame %>% head() %>% kabletable(scale = TRUE)
+```
+
+The dataframe looks really nice. We have everything well formatted except for location. It looks really small here because it has been scaled down to fit in the width of this pdf. Here is an overview of the current columns: 
+
+```{r}
+markets_frame %>% glimpse()
+```
+
+
+### Add Location
+
+To add Location we need to unpack the Location components from the JSON file. 
+
+```{r}
+# Grab location
+location_raw <- food_markets %>% 
+  map("Location")
+
+# look at one of the location variables
+location_raw[[345]]
+```
+
+We have a keyless JSON with a series of nameless lists. Now we should extract names from the meta component and apply them. 
+
+```{r}
+# grab location items
+locs <- which(c_names == "Location")
+
+# pull locations from JSON metadata
+location_meta <- food_markets_raw[[c("meta", "view", "columns")]][[locs]]
+
+# location names 
+loc_names <- location_meta[["subColumnTypes"]] %>% flatten_chr()
+
+# apply names 
+location_raw %<>% map(set_names, loc_names)
+
+# check earlier location to see results 
+location_raw[[345]]
+```
+
+Looks better! Now we know what each of these lists means. Next up we need to parse the human address section. We will do the following: 
+
+  - parse the human adress section
+  - bind the elements to a dataframe
+  - add "ha_" to each name to avoid problems when we combine these
+
+```{r}
+# create replacement address for NULL addresses
+replace_string <- "{\"address\":\"0000 NO RD\",\"city\":\"NONE\",\"state\":\"NY\",\"zip\":\"00000\"}"
+
+ha <- location_raw %>% 
+  map("human_address", .null = NA) %>% 
+  replace(is.na(.), replace_string) %>% 
+  flatten_chr() %>% 
+  map_df(fromJSON) %>% 
+  set_names(paste0("ha_", names(.)))
+
+ha %>% head() %>% kabletable()
+```
+
+### Handling the Remaining Variables 
+
+We still need to grab the rest of the variables from the Locations data frame. 
+
+```{r}
+everything_else <- location_raw %>% 
+  map_df(safe_extract, loc_names[loc_names != "human_address"]) %>% 
+  mutate_at(vars(latitude, longitude), as.numeric)
+
+everything_else %>% head() %>% kabletable()
+```
+
+This looks a little off, considering all the latitudes and longitudes display NA. Lets take a closer look to make sure there isn't an error lurking somewhere.
+
+```{r}
+everything_else %>% 
+  select(latitude, longitude) %>% 
+  map(summary)
+
+dim(everything_else)[[1]]
+```
+
+We see from the output above that, while there are 5415 NAs for (latitude, longitude), we still have 29389 - 5415 = 23974 value containing points. We also see that our latitudes are in the [40.51, 44.99] range and out longitudes are in the [-79.76, -71.94] range. This coincides the with the [New York Latitude and Longitude Map](https://www.mapsofworld.com/usa/states/new-york/lat-long.html) which indicates we should lie within [40, 50] and [-80, -72]. 
+
+### Putting the Dataframes Together
+
+Now that we have the markets, human address and everything else data frames, let's combine them.
+
+```{r}
+# combine dataframes
+markets_frame <- bind_cols(markets_frame, ha, everything_else)
+
+# remove leading / trailing white space
+markets_frame %<>% mutate_if(is.character, trimws)
+
+markets_frame %>% head() %>% kabletable(scale = TRUE)
+```
+
+Finally, our table is all together. Once again, the table display is small due to the width of a pdf file. Here is an overview of the different columns: 
+
+```{r}
+markets_frame %>% glimpse()
+```
+
+### Question 1 
+
+Now that we have all this information, what does it look like on a map? 
+
+First we must load our shape file, which contains all the coordinates of our New York map.
+
+```{r}
+# read in shapefile for NY state 
+NY_state <- readOGR("/home/michael/Desktop/SS/BigDataCapstone", layer = "nys")
+```
+
+Before we plot our points, we need to change the orientation of the latitude and longitude points. Currently they are **unprojected**, whereas our map is in a projected coordinate system. So we much project these points before we plot. 
+
+```{r}
+# grab non-NA lat / long components 
+map_markets_frame <- markets_frame[!is.na(markets_frame$latitude) & !is.na(markets_frame$longitude), ]
+
+# coerce square footage to numeric
+markets_frame %<>% mutate(`Square Footage` = as.numeric(`Square Footage`))
+map_markets_frame %<>% mutate(`Square Footage` = as.numeric(`Square Footage`))
+
+# grab coordinates 
+coordinates(map_markets_frame) <- ~longitude + latitude
+
+# set projected coordinate system
+proj4string(map_markets_frame) <- CRS("+proj=longlat +datum=NAD83")
+
+# add projected coordinates to map
+map_markets_frame %<>% spTransform(CRS(proj4string(NY_state)))
+
+# create geo data dataframe 
+geo_data <- data.frame(coordinates(map_markets_frame))
+
+# set coord names
+names(geo_data) <- c("x", "y")
+```
+
+Now we can plot it: 
+
+```{r}
+ggplot() + 
+  geom_polygon(data = NY_state, aes(x = long, y = lat, group = group), fill = "#99CCFF") + 
+  labs(x = "", y = "", title = "New York Food Markets") + 
+  theme(axis.ticks = element_blank(),
+        axis.text = element_blank()) +
+  geom_point(data = geo_data, aes(x = x, y = y), shape = 21, fill = "#CCCC00", color = "black", stroke = 0.1) + 
+  coord_equal(ratio = 1)
+```
+
+As expected, New York City is packed with Food shops. Certain areas of upstate New York are particularly sparse. 
+
+### Question 2
+
+Which cities have the largest number of food shops? 
+
+```{r}
+markets_frame %>%
+  group_by(City) %>%
+  count(sort = TRUE) %>% 
+  head(10) %>% 
+ggplot() + 
+  geom_col(aes(x = reorder(City, -n), y = n), fill = "#99CCFF") + 
+  xlab("City") + ylab("Count") + 
+  theme(axis.text.x = element_text(angle = 30)) + 
+  geom_text(aes(label = n, x = City, y = n), vjust = -1) + 
+  ggtitle("Store Counts by City")
+```
+
+From the plot above, we see that Brooklyn has roughly twice as many food shops as the rest of New York City. We also see that Bronx has roughly as many food shops as NY, NY.
+
+### Question 3
+
+How are store sizes distributed? 
+
+```{r}
+markets_frame %>% select(`Square Footage`) %>% summary()
+```
+
+We see from a summary the following: 
+
+  - Some stores claim 0 sqft
+  - The median square footage is 1718 sqft 
+  - The mean is 6276 sqft. The difference between this and the median indicates pull from outliers
+  - The max size is a whopping 850,000 sqft
+
+Lets visualize the distribution: 
+
+```{r}
+p_unscaled <- ggplot(markets_frame) + 
+  geom_density(aes(x = `Square Footage`), fill = "#CCCC00") + 
+  ggtitle("Unscaled") + 
+  ylab(NULL) + xlab("Square Feet")
+
+p_scaled <- ggplot(markets_frame) + 
+  geom_density(aes(x = log10(`Square Footage`)), fill = "#99CCFF") + 
+  ggtitle(paste0(expression(log10), "Scaled")) + 
+  xlab(paste0(expression(log10), "Square Feet"))
+
+ggarrange(p_scaled, p_unscaled, nrow = 1)
+```
+
+We see from the plots above that: 
+
+  - Square footage is roughly normally distributed around 3500 sqft
+  - The 850,000 square foot outlier really skews the plot. 
+  
+### Question 4
+
+Who exactly are the outliers? 
+
+```{r}
+markets_frame %>% arrange(desc(`Square Footage`)) %>% select(`Square Footage`, `Entity Name`, ha_city) %>% head(10) %>% kabletable()
+```
+
+The largest food retailer in New York is Top Markets LLC. Of note is that none of these goliath sized retailers are located in New York City or any of its Boroughs. 
+
+### Question 5
+
+Which stores are the most represented overall? Which franchise has the most food outlets? 
+
+```{r}
+markets_frame %>% group_by(`Entity Name`) %>% count(sort = TRUE) %>% head(10) %>% 
+  ggplot() + 
+  geom_col(aes(x = reorder(`Entity Name`, -n), y = n), fill = "#99CCFF") +
+  xlab("Store Owner") + ylab("Count") +
+  theme(axis.text.x = element_text(angle = 90)) +
+  geom_text(aes(label = n, x = `Entity Name`, y = n), vjust = -1) + 
+  ggtitle("Top 10 Stores by Number of Shops")
+  
+```
+
+Of the stores above: 
+
+  - There are 3 pharmacies: CVS, Walgreens, and Rite Aid
+  - There are 3 gas stations: Stewarts, Speedway, and United Refining (Kwik Fill)
+  - There are 3 discount stores: Dolgencorp (Dollar General), Dollar Tree, and Family Dollar
+  - There is one general convenience store: 7-eleven
